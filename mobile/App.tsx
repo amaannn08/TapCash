@@ -31,21 +31,28 @@ import {
   Clock,
   X,
   Wallet,
-  Building2,
+  User,
+  Users,
+  ChevronDown,
+  LogOut,
   Coffee,
 } from 'lucide-react-native';
 import { Colors } from './src/core/theme/colors';
+import { UsersDB, UserProfile, PRESET_USERS } from './src/core/auth/userManager';
 import { LocalDB, LocalLedgerEntry, PendingVoucher } from './src/core/database/sqlite';
 import { MockTapBridge } from './src/features/tap_to_pay/mockTapBridge';
 
 type ActiveTab = 'home' | 'send' | 'receive' | 'wallet' | 'sync';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<UserProfile>(UsersDB.getCurrentUser());
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
-  const [balance, setBalance] = useState(LocalDB.getBalance());
   const [history, setHistory] = useState<LocalLedgerEntry[]>(LocalDB.getHistory());
   const [pendingQueue, setPendingQueue] = useState<PendingVoucher[]>(LocalDB.getPendingQueue());
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+  // Switch User Modal
+  const [switchUserModalVisible, setSwitchUserModalVisible] = useState(false);
 
   // Camera permissions
   const [permission, requestPermission] = useCameraPermissions();
@@ -59,17 +66,14 @@ export default function App() {
   const [isSending, setIsSending] = useState(false);
   const [sendSuccessMsg, setSendSuccessMsg] = useState<string | null>(null);
 
-  // Receive / POS State
+  // Receive / Custom QR State
   const [receiveAmount, setReceiveAmount] = useState('150');
   const [receiveNote, setReceiveNote] = useState('Payment for Chai & Snacks');
-
-  // Top Up & Escrow State
-  const [isToppingUp, setIsToppingUp] = useState(false);
 
   // Tap-to-Pay NFC Modal
   const [tapModalVisible, setTapModalVisible] = useState(false);
   const [tapAmount, setTapAmount] = useState('150');
-  const [merchantName, setMerchantName] = useState('Metro Coffee Store');
+  const [merchantName, setMerchantName] = useState('Metro Coffee Roasters');
   const [isProcessingTap, setIsProcessingTap] = useState(false);
   const [tapResultMsg, setTapResultMsg] = useState<string | null>(null);
 
@@ -77,16 +81,26 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   const refreshState = () => {
-    setBalance(LocalDB.getBalance());
+    setCurrentUser(UsersDB.getCurrentUser());
     setHistory(LocalDB.getHistory());
     setPendingQueue(LocalDB.getPendingQueue());
   };
 
-  // Real Dynamic QR Payload
+  // Switch Active User
+  const handleSelectUser = (userId: string) => {
+    const newUser = UsersDB.switchUser(userId);
+    setCurrentUser(newUser);
+    setSwitchUserModalVisible(false);
+    refreshState();
+    Alert.alert('Account Switched', `Logged in as: ${newUser.name} (${newUser.email})`);
+  };
+
+  // Real Dynamic Personalized QR Payload
   const qrPayload = JSON.stringify({
     type: 'TAPCASH_POS_INTENT',
-    merchantId: 'usr_merchant_77a9',
-    merchantName: 'Metro Coffee Roasters',
+    merchantId: currentUser.id,
+    merchantName: currentUser.name,
+    merchantEmail: currentUser.email,
     amountCents: Math.round((parseFloat(receiveAmount) || 0) * 100),
     nonce: `nonce_${Date.now()}`,
     note: receiveNote,
@@ -94,17 +108,17 @@ export default function App() {
   });
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(qrPayload)}&bgcolor=ffffff&color=09090b&margin=2`;
 
-  // 1. Send Online P2P Transfer
+  // 1. Send Online P2P Transfer (Debits logged-in user, credits recipient)
   const handleSendP2P = async () => {
     const amountNum = parseFloat(sendAmount);
     if (!recipientEmail || isNaN(amountNum) || amountNum <= 0) {
-      Alert.alert('Invalid Input', 'Please enter recipient email and valid amount.');
+      Alert.alert('Invalid Input', 'Please enter recipient email/ID and valid amount.');
       return;
     }
 
     const amountCents = Math.round(amountNum * 100);
-    if (balance < amountCents) {
-      Alert.alert('Insufficient Balance', 'You do not have enough balance.');
+    if (currentUser.balanceCents < amountCents) {
+      Alert.alert('Insufficient Balance', `You only have ₹${(currentUser.balanceCents / 100).toFixed(2)} in your account.`);
       return;
     }
 
@@ -112,9 +126,17 @@ export default function App() {
     setSendSuccessMsg(null);
 
     setTimeout(() => {
+      const res = UsersDB.transfer(currentUser.id, recipientEmail, amountCents);
+
+      if (!res.success) {
+        setIsSending(false);
+        Alert.alert('Transfer Failed', res.error);
+        return;
+      }
+
       const voucher: PendingVoucher = {
         voucherId: `vch_p2p_${Date.now()}`,
-        payerPublicKey: 'pub_device_payer_key_99',
+        payerPublicKey: currentUser.devicePublicKey,
         payeeId: recipientEmail,
         amountCents,
         currency: 'INR',
@@ -125,10 +147,10 @@ export default function App() {
         status: isOfflineMode ? 'PENDING' : 'SYNCED',
       };
 
-      LocalDB.recordOfflineDebit(voucher, `P2P Sent to ${recipientEmail} (${sendNote || 'Transfer'})`);
+      LocalDB.recordOfflineDebit(voucher, `Sent to ${res.toUser ? res.toUser.name : recipientEmail} (${sendNote || 'Transfer'})`);
       setIsSending(false);
       refreshState();
-      setSendSuccessMsg(`₹${amountNum.toFixed(2)} sent successfully to ${recipientEmail}!`);
+      setSendSuccessMsg(`₹${amountNum.toFixed(2)} transferred successfully to ${res.toUser ? res.toUser.name : recipientEmail}!`);
       setSendAmount('');
       setRecipientEmail('');
       setSendNote('');
@@ -145,12 +167,12 @@ export default function App() {
       const parsed = JSON.parse(data);
       if (parsed.type === 'TAPCASH_POS_INTENT' || parsed.type === 'TAPCASH_PAY_INTENT') {
         const amt = parsed.amountCents ? (parsed.amountCents / 100).toString() : parsed.amount || '0';
-        const payee = parsed.merchantName || parsed.merchantId || parsed.payee || 'Merchant';
+        const payee = parsed.merchantEmail || parsed.merchantName || parsed.merchantId || parsed.payee || 'Merchant';
         setActiveTab('send');
         setRecipientEmail(payee);
         setSendAmount(amt);
         setSendNote(parsed.note || 'Scanned via Live Camera');
-        Alert.alert('QR Scanned Successfully! 🎉', `Merchant: ${payee}\nAmount: ₹${amt}`);
+        Alert.alert('QR Scanned! 🎉', `Recipient: ${parsed.merchantName || payee}\nAmount: ₹${amt}`);
         return;
       }
     } catch {
@@ -160,7 +182,7 @@ export default function App() {
     setActiveTab('send');
     setRecipientEmail(data.substring(0, 30));
     setSendAmount('150');
-    Alert.alert('Code Scanned', `Scanned raw code: ${data}`);
+    Alert.alert('Code Scanned', `Scanned address: ${data}`);
   };
 
   const openCameraScanner = async () => {
@@ -177,25 +199,22 @@ export default function App() {
 
   // 3. Top-Up Wallet Balance
   const handleTopUp = (amt: number) => {
-    setIsToppingUp(true);
-    setTimeout(() => {
-      const voucher: PendingVoucher = {
-        voucherId: `topup_${Date.now()}`,
-        payerPublicKey: 'bank_gateway',
-        payeeId: 'self',
-        amountCents: amt * 100,
-        currency: 'INR',
-        sequenceNumber: LocalDB.getSequence(),
-        timestamp: Date.now(),
-        nonce: `topup_nonce_${Date.now()}`,
-        signature: 'bank_verified',
-        status: 'SYNCED',
-      };
-      LocalDB.recordOfflineCredit(voucher, `Top-Up via UPI/Bank (+₹${amt})`);
-      setIsToppingUp(false);
-      refreshState();
-      Alert.alert('Top-Up Success', `₹${amt} added to your TapCash Wallet!`);
-    }, 600);
+    UsersDB.topUp(currentUser.id, amt * 100);
+    const voucher: PendingVoucher = {
+      voucherId: `topup_${Date.now()}`,
+      payerPublicKey: 'bank_gateway',
+      payeeId: currentUser.id,
+      amountCents: amt * 100,
+      currency: 'INR',
+      sequenceNumber: LocalDB.getSequence(),
+      timestamp: Date.now(),
+      nonce: `topup_nonce_${Date.now()}`,
+      signature: 'bank_verified',
+      status: 'SYNCED',
+    };
+    LocalDB.recordOfflineCredit(voucher, `Top-Up via UPI/Bank (+₹${amt})`);
+    refreshState();
+    Alert.alert('Top-Up Success', `₹${amt} added to ${currentUser.name}'s wallet!`);
   };
 
   // 4. NFC Tap-to-Pay Beam
@@ -212,6 +231,7 @@ export default function App() {
       amountCents: Math.round(amountNum * 100),
     });
 
+    UsersDB.transfer(currentUser.id, 'merchant@metrocoffee.com', Math.round(amountNum * 100));
     setIsProcessingTap(false);
     refreshState();
 
@@ -243,17 +263,21 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      {/* Header */}
+      {/* Header with User Selector */}
       <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <View style={styles.logoBadge}>
-            <Zap size={18} color="#10B981" />
+        <TouchableOpacity style={styles.userProfileSelector} onPress={() => setSwitchUserModalVisible(true)}>
+          <View style={styles.avatarCircle}>
+            <Text style={{ fontSize: 16 }}>{currentUser.avatar}</Text>
           </View>
           <View>
-            <Text style={styles.appTitle}>TapCash</Text>
-            <Text style={styles.appSubtitle}>Hardware-Grade NFC & Offline Ledger</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.userNameText}>{currentUser.name}</Text>
+              <ChevronDown size={14} color="#A1A1AA" />
+            </View>
+            <Text style={styles.userEmailText}>{currentUser.email}</Text>
           </View>
-        </View>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.networkBadge, isOfflineMode ? styles.badgeOffline : styles.badgeOnline]}
           onPress={() => setIsOfflineMode(!isOfflineMode)}
@@ -273,23 +297,23 @@ export default function App() {
             {/* Balance Card */}
             <View style={styles.balanceCard}>
               <View style={styles.cardHeaderRow}>
-                <Text style={styles.balanceLabel}>Available Balance</Text>
+                <Text style={styles.balanceLabel}>Account Balance ({currentUser.name})</Text>
                 <View style={styles.escrowChip}>
                   <Lock size={12} color="#10B981" />
                   <Text style={styles.escrowText}>Escrow Active</Text>
                 </View>
               </View>
-              <Text style={styles.balanceAmount}>₹{(balance / 100).toFixed(2)}</Text>
+              <Text style={styles.balanceAmount}>₹{(currentUser.balanceCents / 100).toFixed(2)}</Text>
               <View style={styles.securityRow}>
                 <View style={styles.keyBadge}>
                   <ShieldCheck size={14} color="#10B981" />
-                  <Text style={styles.securityText}>Ed25519 Secure Enclave</Text>
+                  <Text style={styles.securityText}>{currentUser.devicePublicKey}</Text>
                 </View>
                 <Text style={styles.seqText}>Seq #{LocalDB.getSequence()}</Text>
               </View>
             </View>
 
-            {/* Quick Actions Grid (Lucide Icons) */}
+            {/* Quick Actions Grid */}
             <View style={styles.quickGrid}>
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setActiveTab('send')}>
                 <View style={[styles.iconCircle, { backgroundColor: 'rgba(59, 130, 246, 0.15)', borderColor: 'rgba(59, 130, 246, 0.4)' }]}>
@@ -309,7 +333,7 @@ export default function App() {
                 <View style={[styles.iconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: 'rgba(16, 185, 129, 0.4)' }]}>
                   <ArrowDownLeft size={22} color="#34D399" />
                 </View>
-                <Text style={styles.quickActionLabel}>Receive</Text>
+                <Text style={styles.quickActionLabel}>My QR</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setTapModalVisible(true)}>
@@ -319,6 +343,16 @@ export default function App() {
                 <Text style={styles.quickActionLabel}>Tap-to-Pay</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Quick Switch User Helper Banner */}
+            <TouchableOpacity style={styles.switchUserBanner} onPress={() => setSwitchUserModalVisible(true)}>
+              <Users size={18} color="#60A5FA" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.switchBannerTitle}>Testing 2-Party Payments?</Text>
+                <Text style={styles.switchBannerDesc}>Tap to switch account (Aman ↔ Sarah ↔ Merchant)</Text>
+              </View>
+              <Text style={{ color: '#60A5FA', fontWeight: 'bold' }}>Switch →</Text>
+            </TouchableOpacity>
 
             {/* Sync Queue Alert Banner */}
             {pendingQueue.length > 0 && (
@@ -373,7 +407,7 @@ export default function App() {
             <View style={styles.tabHeaderRow}>
               <View>
                 <Text style={styles.tabHeading}>Send Money</Text>
-                <Text style={styles.tabSubheading}>Instant offline or online transfer</Text>
+                <Text style={styles.tabSubheading}>From: {currentUser.name} (₹{(currentUser.balanceCents / 100).toFixed(2)})</Text>
               </View>
               <TouchableOpacity style={styles.scanBadgeBtn} onPress={openCameraScanner}>
                 <Scan size={14} color="#000" />
@@ -388,15 +422,29 @@ export default function App() {
               </View>
             )}
 
-            <Text style={styles.inputLabel}>Recipient Email / Merchant ID</Text>
+            <Text style={styles.inputLabel}>Recipient Email / User ID</Text>
             <TextInput
               style={styles.textInput}
               value={recipientEmail}
               onChangeText={setRecipientEmail}
-              placeholder="alex@tapcash.io or usr_merchant_77"
+              placeholder="e.g. sarah@tapcash.io or merchant@metrocoffee.com"
               placeholderTextColor={Colors.textMuted}
               autoCapitalize="none"
             />
+
+            {/* Quick Contact Chips */}
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+              {PRESET_USERS.filter((u) => u.id !== currentUser.id).map((u) => (
+                <TouchableOpacity
+                  key={u.id}
+                  style={styles.contactChip}
+                  onPress={() => setRecipientEmail(u.email)}
+                >
+                  <Text style={{ fontSize: 12 }}>{u.avatar}</Text>
+                  <Text style={styles.contactChipText}>{u.name.split(' ')[0]}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
             <Text style={styles.inputLabel}>Amount (₹)</Text>
             <TextInput
@@ -413,7 +461,7 @@ export default function App() {
               style={styles.textInput}
               value={sendNote}
               onChangeText={setSendNote}
-              placeholder="Chai, lunch, groceries..."
+              placeholder="Lunch, movie, rent..."
               placeholderTextColor={Colors.textMuted}
             />
 
@@ -430,26 +478,26 @@ export default function App() {
           </View>
         )}
 
-        {/* TAB 3: RECEIVE / DYNAMIC SCANNABLE QR */}
+        {/* TAB 3: RECEIVE / PERSONAL USER QR */}
         {activeTab === 'receive' && (
           <View style={[styles.cardSection, { alignItems: 'center' }]}>
-            <Text style={styles.tabHeading}>Receive Payment</Text>
-            <Text style={styles.tabSubheading}>Scan with any camera or TapCash app</Text>
+            <Text style={styles.tabHeading}>{currentUser.name}'s Personal QR</Text>
+            <Text style={styles.tabSubheading}>Others can scan this QR to pay you directly</Text>
 
-            {/* Real Dynamic Scannable QR Code */}
+            {/* Unique Scannable QR Code */}
             <View style={styles.realQrContainer}>
               <Image source={{ uri: qrCodeUrl }} style={styles.realQrImage} resizeMode="contain" />
               <Text style={styles.qrAmountBadge}>₹{receiveAmount}</Text>
               <Text style={styles.qrMetaText}>{receiveNote}</Text>
               <View style={styles.merchantBadge}>
-                <Coffee size={12} color="#71717A" />
-                <Text style={styles.qrIdText}>Metro Coffee Roasters</Text>
+                <Text style={{ fontSize: 13 }}>{currentUser.avatar}</Text>
+                <Text style={styles.qrIdText}>{currentUser.email}</Text>
               </View>
             </View>
 
             {/* Custom Amount Controls */}
-            <View style={{ width: '100%', marginTop: 20 }}>
-              <Text style={styles.inputLabel}>Set Amount (₹)</Text>
+            <View style={{ width: '100%', marginTop: 15 }}>
+              <Text style={styles.inputLabel}>Requested Amount (₹)</Text>
               <TextInput
                 style={styles.textInput}
                 value={receiveAmount}
@@ -459,7 +507,7 @@ export default function App() {
                 placeholderTextColor={Colors.textMuted}
               />
 
-              <Text style={styles.inputLabel}>Payment Note</Text>
+              <Text style={styles.inputLabel}>Note</Text>
               <TextInput
                 style={styles.textInput}
                 value={receiveNote}
@@ -474,15 +522,15 @@ export default function App() {
         {/* TAB 4: WALLET & TOP-UP */}
         {activeTab === 'wallet' && (
           <View style={styles.cardSection}>
-            <Text style={styles.tabHeading}>Wallet & Escrow</Text>
-            <Text style={styles.tabSubheading}>Add funds to offline double-entry vault</Text>
+            <Text style={styles.tabHeading}>Wallet Vault</Text>
+            <Text style={styles.tabSubheading}>Account: {currentUser.name} ({currentUser.email})</Text>
 
             <View style={styles.balanceCard}>
-              <Text style={styles.balanceLabel}>Vault Balance</Text>
-              <Text style={styles.balanceAmount}>₹{(balance / 100).toFixed(2)}</Text>
+              <Text style={styles.balanceLabel}>Available Funds</Text>
+              <Text style={styles.balanceAmount}>₹{(currentUser.balanceCents / 100).toFixed(2)}</Text>
             </View>
 
-            <Text style={styles.sectionTitle}>Instant Top-Up</Text>
+            <Text style={styles.sectionTitle}>Add Money to {currentUser.name}</Text>
             <View style={styles.presetRow}>
               <TouchableOpacity style={styles.presetBtn} onPress={() => handleTopUp(500)}>
                 <Text style={styles.presetText}>+ ₹500</Text>
@@ -558,7 +606,7 @@ export default function App() {
 
         <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('receive')}>
           <QrCode size={22} color={activeTab === 'receive' ? '#10B981' : '#71717A'} />
-          <Text style={[styles.navLabel, activeTab === 'receive' && styles.navLabelActive]}>Receive</Text>
+          <Text style={[styles.navLabel, activeTab === 'receive' && styles.navLabelActive]}>My QR</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('wallet')}>
@@ -572,11 +620,46 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {/* Switch User Modal */}
+      <Modal visible={switchUserModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeaderRow}>
+              <View style={styles.modalHeaderLeft}>
+                <Users size={20} color="#10B981" />
+                <Text style={styles.modalTitle}>Switch Account</Text>
+              </View>
+              <TouchableOpacity onPress={() => setSwitchUserModalVisible(false)}>
+                <X size={20} color="#71717A" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalSubtitle}>Select an account to test real P2P & QR payments</Text>
+
+            {UsersDB.getAllUsers().map((u) => (
+              <TouchableOpacity
+                key={u.id}
+                style={[styles.userOptionCard, u.id === currentUser.id && styles.userOptionActive]}
+                onPress={() => handleSelectUser(u.id)}
+              >
+                <View style={styles.avatarCircle}>
+                  <Text style={{ fontSize: 20 }}>{u.avatar}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.userOptionName}>{u.name}</Text>
+                  <Text style={styles.userOptionEmail}>{u.email}</Text>
+                </View>
+                <Text style={styles.userOptionBalance}>₹{(u.balanceCents / 100).toFixed(2)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </Modal>
+
       {/* Real Camera Scanner Modal */}
       <Modal visible={isScannerOpen} animationType="slide" onRequestClose={() => setIsScannerOpen(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
           <View style={styles.scannerHeader}>
-            <Text style={styles.scannerTitle}>Scan QR Code</Text>
+            <Text style={styles.scannerTitle}>Scan User QR Code</Text>
             <TouchableOpacity onPress={() => setIsScannerOpen(false)} style={styles.scannerCloseBtn}>
               <X size={18} color="#fff" />
             </TouchableOpacity>
@@ -595,7 +678,7 @@ export default function App() {
             <View style={styles.scannerBox}>
               <View style={styles.laserLine} />
             </View>
-            <Text style={styles.scannerHelperText}>Point camera at Merchant POS screen or QR</Text>
+            <Text style={styles.scannerHelperText}>Point camera at any user's personal QR or POS</Text>
           </View>
         </SafeAreaView>
       </Modal>
@@ -677,28 +760,27 @@ const styles = StyleSheet.create({
     borderBottomColor: '#18181B',
     backgroundColor: '#09090B',
   },
-  brandRow: {
+  userProfileSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  logoBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  avatarCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: '#18181B',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: '#27272A',
   },
-  appTitle: {
-    fontSize: 18,
+  userNameText: {
+    fontSize: 15,
     fontWeight: '900',
     color: '#FAFAFA',
-    letterSpacing: 0.3,
   },
-  appSubtitle: {
+  userEmailText: {
     fontSize: 11,
     color: '#71717A',
   },
@@ -799,9 +881,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   securityText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#34D399',
-    fontWeight: '600',
+    fontWeight: '700',
+    fontFamily: 'monospace',
   },
   seqText: {
     fontSize: 12,
@@ -811,7 +894,7 @@ const styles = StyleSheet.create({
   quickGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   quickActionCard: {
     alignItems: 'center',
@@ -830,6 +913,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#D4D4D8',
+  },
+  switchUserBanner: {
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    padding: 14,
+    borderRadius: 18,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+    gap: 12,
+  },
+  switchBannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#93C5FD',
+  },
+  switchBannerDesc: {
+    fontSize: 11,
+    color: '#BFDBFE',
+    marginTop: 2,
   },
   syncBanner: {
     backgroundColor: '#18181B',
@@ -993,6 +1097,20 @@ const styles = StyleSheet.create({
     color: '#FAFAFA',
     fontSize: 15,
     marginBottom: 14,
+  },
+  contactChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#27272A',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  contactChipText: {
+    color: '#FAFAFA',
+    fontSize: 12,
+    fontWeight: '700',
   },
   primaryActionButton: {
     backgroundColor: '#10B981',
@@ -1211,6 +1329,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 16,
+  },
+  userOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#09090B',
+    padding: 14,
+    borderRadius: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  userOptionActive: {
+    borderColor: '#10B981',
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+  },
+  userOptionName: {
+    color: '#FAFAFA',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  userOptionEmail: {
+    color: '#71717A',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  userOptionBalance: {
+    color: '#10B981',
+    fontWeight: '900',
+    fontSize: 15,
   },
   modalOverlay: {
     flex: 1,
