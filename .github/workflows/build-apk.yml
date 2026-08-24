@@ -29,8 +29,8 @@ jobs:
           go build -v ./cmd/server
           go build -v ./cmd/simulator
 
-  mobile-build-apk:
-    name: Build Android Release APK
+  mobile-build:
+    name: Build Android Release APK & AAB
     runs-on: ubuntu-latest
     needs: backend-test
     steps:
@@ -53,18 +53,18 @@ jobs:
 
       - name: Install Mobile Dependencies
         working-directory: ./mobile
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Export & Prebuild Android Project
         working-directory: ./mobile
         run: npx @expo/cli prebuild --platform android --clean --no-install
 
-      - name: Generate Release Keystore
+      - name: Generate Production Keystore
         working-directory: ./mobile/android/app
         run: |
           keytool -genkeypair -v -keystore release.keystore -alias tapcash -keyalg RSA -keysize 2048 -validity 10000 -storepass tapcash123 -keypass tapcash123 -dname "CN=TapCash, OU=Mobile, O=TapCash, L=City, S=State, C=IN"
 
-      - name: Configure Release Signing in build.gradle
+      - name: Configure Production Signing in build.gradle
         working-directory: ./mobile/android/app
         run: |
           node -e '
@@ -87,13 +87,24 @@ jobs:
         working-directory: ./mobile/android
         run: chmod +x gradlew
 
-      - name: Build Android Release APK
+      - name: Build Android Release APK (Direct Install)
         working-directory: ./mobile/android
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK Release Artifact
+      - name: Build Android App Bundle (Google Play Store AAB)
+        working-directory: ./mobile/android
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
         with:
           name: TapCash-Android-Release-APK
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload Play Store AAB Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: TapCash-PlayStore-Release-AAB
+          path: mobile/android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
