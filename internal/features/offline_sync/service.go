@@ -24,7 +24,6 @@ func NewService(pool *pgxpool.Pool) *Service {
 	}
 }
 
-// ReconcileBatch processes a batch of offline NFC vouchers with parallel signature verification and atomic double-entry ledger writes.
 func (s *Service) ReconcileBatch(ctx context.Context, req SyncBatchRequest) (*SyncBatchResponse, error) {
 	start := time.Now()
 	total := len(req.Vouchers)
@@ -84,7 +83,7 @@ func (s *Service) ReconcileBatch(ctx context.Context, req SyncBatchRequest) (*Sy
 		}
 	}
 
-	// 2. Sort valid vouchers by SequenceNumber to guarantee monotonic ledger application
+	// 2. Sort valid vouchers by SequenceNumber
 	type indexedVoucher struct {
 		index   int
 		voucher OfflineVoucher
@@ -99,7 +98,6 @@ func (s *Service) ReconcileBatch(ctx context.Context, req SyncBatchRequest) (*Sy
 		return validVouchers[i].voucher.SequenceNumber < validVouchers[j].voucher.SequenceNumber
 	})
 
-	// 3. Process Ledger Reconciliation per voucher with Row-Locking and Invariant Validation
 	var reconciledCount, duplicateCount, rejectedCount int
 
 	for _, item := range validVouchers {
@@ -143,9 +141,15 @@ func (s *Service) ReconcileBatch(ctx context.Context, req SyncBatchRequest) (*Sy
 }
 
 func (s *Service) processSingleVoucher(ctx context.Context, v OfflineVoucher) (VoucherReconcileStatus, string) {
-	// Replay Protection Check
 	if err := s.nonceRegistry.CheckAndRecord(v.Nonce); err != nil {
 		return StatusDuplicate, "duplicate nonce / voucher already processed"
+	}
+
+	// 1. Resolve Payer User ID from Public Key
+	var payerUserID string
+	err := s.pool.QueryRow(ctx, "SELECT user_id FROM device_keys WHERE public_key = $1 AND is_active = TRUE", v.PayerPublicKey).Scan(&payerUserID)
+	if err != nil {
+		return StatusRejected, "payer device public key not registered"
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -161,22 +165,41 @@ func (s *Service) processSingleVoucher(ctx context.Context, v OfflineVoucher) (V
 		return StatusDuplicate, "voucher previously reconciled"
 	}
 
-	// 1. Resolve Payer by Device Key
-	var payerUserID string
-	err = tx.QueryRow(ctx, "SELECT user_id FROM device_keys WHERE public_key = $1 AND is_active = TRUE", v.PayerPublicKey).Scan(&payerUserID)
-	if err != nil {
-		return StatusRejected, "payer device public key not registered"
+	// 2. Lock Wallets in Deterministic Order
+	firstUserID, secondUserID := payerUserID, v.PayeeID
+	if firstUserID > secondUserID {
+		firstUserID, secondUserID = secondUserID, firstUserID
 	}
 
-	// 2. Lock Payer Wallet
-	var payerWalletID string
-	var payerBalance, payerAllocated, lastSeq int64
+	var w1ID, w1UserID string
+	var w1Bal, w1Allocated, w1Seq int64
 	err = tx.QueryRow(ctx, `
-		SELECT id, balance_cents, offline_allocated_cents, last_sequence_number
+		SELECT id, user_id, balance_cents, offline_allocated_cents, last_sequence_number
 		FROM wallets WHERE user_id = $1 FOR UPDATE
-	`, payerUserID).Scan(&payerWalletID, &payerBalance, &payerAllocated, &lastSeq)
+	`, firstUserID).Scan(&w1ID, &w1UserID, &w1Bal, &w1Allocated, &w1Seq)
 	if err != nil {
-		return StatusRejected, "payer wallet not found"
+		return StatusRejected, fmt.Sprintf("wallet for user %s not found", firstUserID)
+	}
+
+	var w2ID, w2UserID string
+	var w2Bal, w2Allocated, w2Seq int64
+	err = tx.QueryRow(ctx, `
+		SELECT id, user_id, balance_cents, offline_allocated_cents, last_sequence_number
+		FROM wallets WHERE user_id = $1 FOR UPDATE
+	`, secondUserID).Scan(&w2ID, &w2UserID, &w2Bal, &w2Allocated, &w2Seq)
+	if err != nil {
+		return StatusRejected, fmt.Sprintf("wallet for user %s not found", secondUserID)
+	}
+
+	var payerWalletID, payeeWalletID string
+	var payerBalance, payerAllocated, lastSeq, payeeBalance int64
+
+	if w1UserID == payerUserID {
+		payerWalletID, payerBalance, payerAllocated, lastSeq = w1ID, w1Bal, w1Allocated, w1Seq
+		payeeWalletID, payeeBalance = w2ID, w2Bal
+	} else {
+		payeeWalletID, payeeBalance = w1ID, w1Bal
+		payerWalletID, payerBalance, payerAllocated, lastSeq = w2ID, w2Bal, w2Allocated, w2Seq
 	}
 
 	// Monotonic Sequence Check
@@ -184,22 +207,12 @@ func (s *Service) processSingleVoucher(ctx context.Context, v OfflineVoucher) (V
 		return StatusDuplicate, fmt.Sprintf("sequence counter %d already settled (last: %d)", v.SequenceNumber, lastSeq)
 	}
 
-	// Balance Check: Must not exceed total balance (and released from allocated offline escrow)
+	// Balance Check
 	if payerBalance < v.AmountCents {
 		return StatusRejected, "insufficient funds to reconcile offline voucher"
 	}
 
-	// 3. Resolve & Lock Payee Wallet
-	var payeeWalletID string
-	var payeeBalance int64
-	err = tx.QueryRow(ctx, `
-		SELECT id, balance_cents FROM wallets WHERE user_id = $1 FOR UPDATE
-	`, v.PayeeID).Scan(&payeeWalletID, &payeeBalance)
-	if err != nil {
-		return StatusRejected, "payee wallet not found"
-	}
-
-	// 4. Double-Entry Balance Calculation
+	// Double-Entry Balance Calculation
 	newPayerBalance := payerBalance - v.AmountCents
 	newPayerAllocated := payerAllocated - v.AmountCents
 	if newPayerAllocated < 0 {
@@ -208,7 +221,7 @@ func (s *Service) processSingleVoucher(ctx context.Context, v OfflineVoucher) (V
 	newPayeeBalance := payeeBalance + v.AmountCents
 	txID := fmt.Sprintf("tx_nfc_%s", uuid.New().String())
 
-	// Update Payer Wallet with monotonic sequence advance
+	// Update Payer Wallet
 	_, err = tx.Exec(ctx, `
 		UPDATE wallets 
 		SET balance_cents = $1, offline_allocated_cents = $2, last_sequence_number = $3, updated_at = CURRENT_TIMESTAMP
@@ -226,7 +239,7 @@ func (s *Service) processSingleVoucher(ctx context.Context, v OfflineVoucher) (V
 		return StatusRejected, err.Error()
 	}
 
-	// 5. Double-Entry Immutable Journal Postings
+	// Record Ledger Postings
 	debitLedgerID := fmt.Sprintf("led_dr_%s", uuid.New().String())
 	creditLedgerID := fmt.Sprintf("led_cr_%s", uuid.New().String())
 
@@ -249,7 +262,7 @@ func (s *Service) processSingleVoucher(ctx context.Context, v OfflineVoucher) (V
 		return StatusRejected, err.Error()
 	}
 
-	// 6. Record Settled Transaction
+	// Record Settled Transaction
 	_, err = tx.Exec(ctx, `
 		INSERT INTO transactions (id, payer_wallet_id, payee_wallet_id, amount_cents, currency, channel, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, 'OFFLINE_NFC', 'SETTLED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -258,7 +271,7 @@ func (s *Service) processSingleVoucher(ctx context.Context, v OfflineVoucher) (V
 		return StatusRejected, err.Error()
 	}
 
-	// 7. Record Offline Voucher Entry
+	// Record Offline Voucher Entry
 	_, err = tx.Exec(ctx, `
 		INSERT INTO offline_vouchers (voucher_id, payer_public_key, payer_user_id, payee_user_id, amount_cents, sequence_number, nonce, signature, timestamp, reconciliation_status, reconciled_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'RECONCILED', CURRENT_TIMESTAMP)
