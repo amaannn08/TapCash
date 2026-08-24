@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tapcash-backend
+    runtime: go
+    plan: free
+    region: ohio
+    buildCommand: go build -o bin/server cmd/server/main.go
+    startCommand: ./bin/server
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRATION_HOURS
+        value: 72
