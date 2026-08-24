@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   StatusBar,
   Alert,
+  Image,
 } from 'react-native';
 import { Colors } from './src/core/theme/colors';
 import { LocalDB, LocalLedgerEntry, PendingVoucher } from './src/core/database/sqlite';
@@ -32,13 +33,14 @@ export default function App() {
   const [isSending, setIsSending] = useState(false);
   const [sendSuccessMsg, setSendSuccessMsg] = useState<string | null>(null);
 
+  // Scanner Modal State
+  const [scannerModalVisible, setScannerModalVisible] = useState(false);
+
   // Receive / POS State
   const [receiveAmount, setReceiveAmount] = useState('150');
   const [receiveNote, setReceiveNote] = useState('Payment for Chai & Snacks');
-  const [isQrGenerated, setIsQrGenerated] = useState(true);
 
   // Top Up & Escrow State
-  const [topUpAmount, setTopUpAmount] = useState('');
   const [isToppingUp, setIsToppingUp] = useState(false);
 
   // Tap-to-Pay NFC Modal
@@ -57,6 +59,17 @@ export default function App() {
     setPendingQueue(LocalDB.getPendingQueue());
   };
 
+  // Dynamic QR Code URL encoder
+  const qrPayload = JSON.stringify({
+    type: 'TAPCASH_PAY_INTENT',
+    payee: 'usr_merchant_77a9',
+    name: 'Metro Coffee Store',
+    amount: receiveAmount,
+    note: receiveNote,
+    timestamp: Date.now(),
+  });
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrPayload)}&bgcolor=ffffff&color=09090b&margin=2`;
+
   // 1. Send Online P2P Transfer
   const handleSendP2P = async () => {
     const amountNum = parseFloat(sendAmount);
@@ -74,7 +87,6 @@ export default function App() {
     setIsSending(true);
     setSendSuccessMsg(null);
 
-    // Simulate instant P2P transfer with double-entry local recording
     setTimeout(() => {
       const voucher: PendingVoucher = {
         voucherId: `vch_p2p_${Date.now()}`,
@@ -97,6 +109,16 @@ export default function App() {
       setRecipientEmail('');
       setSendNote('');
     }, 800);
+  };
+
+  // Simulate scanning QR Code
+  const handleSimulateScan = (scannedAmount: string, scannedMerchant: string) => {
+    setScannerModalVisible(false);
+    setActiveTab('send');
+    setRecipientEmail(scannedMerchant);
+    setSendAmount(scannedAmount);
+    setSendNote('Scanned via Dynamic QR');
+    Alert.alert('QR Code Scanned!', `Payment intent loaded: ₹${scannedAmount} to ${scannedMerchant}`);
   };
 
   // 2. Top-Up Wallet Balance
@@ -171,7 +193,7 @@ export default function App() {
       <View style={styles.header}>
         <View>
           <Text style={styles.appTitle}>TapCash</Text>
-          <Text style={styles.appSubtitle}>Full-Scale P2P & Offline NFC</Text>
+          <Text style={styles.appSubtitle}>Offline NFC & Dynamic QR</Text>
         </View>
         <TouchableOpacity
           style={[styles.networkBadge, isOfflineMode ? styles.badgeOffline : styles.badgeOnline]}
@@ -198,7 +220,7 @@ export default function App() {
               </View>
             </View>
 
-            {/* Quick Actions Grid (4 Icons) */}
+            {/* Quick Actions Grid */}
             <View style={styles.quickGrid}>
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setActiveTab('send')}>
                 <View style={[styles.iconCircle, { backgroundColor: '#3B82F6' }]}>
@@ -207,11 +229,18 @@ export default function App() {
                 <Text style={styles.quickActionLabel}>Send P2P</Text>
               </TouchableOpacity>
 
+              <TouchableOpacity style={styles.quickActionCard} onPress={() => setScannerModalVisible(true)}>
+                <View style={[styles.iconCircle, { backgroundColor: '#06B6D4' }]}>
+                  <Text style={styles.iconEmoji}>📷</Text>
+                </View>
+                <Text style={styles.quickActionLabel}>Scan QR</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setActiveTab('receive')}>
                 <View style={[styles.iconCircle, { backgroundColor: '#10B981' }]}>
                   <Text style={styles.iconEmoji}>↙</Text>
                 </View>
-                <Text style={styles.quickActionLabel}>Receive/QR</Text>
+                <Text style={styles.quickActionLabel}>Receive QR</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setTapModalVisible(true)}>
@@ -219,13 +248,6 @@ export default function App() {
                   <Text style={styles.iconEmoji}>⚡</Text>
                 </View>
                 <Text style={styles.quickActionLabel}>Tap-to-Pay</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.quickActionCard} onPress={() => setActiveTab('wallet')}>
-                <View style={[styles.iconCircle, { backgroundColor: '#F59E0B' }]}>
-                  <Text style={styles.iconEmoji}>+</Text>
-                </View>
-                <Text style={styles.quickActionLabel}>Top-Up</Text>
               </TouchableOpacity>
             </View>
 
@@ -243,7 +265,7 @@ export default function App() {
             {/* Immutable Ledger Activity */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Recent Transactions</Text>
-              {history.slice(0, 10).map((entry) => (
+              {history.slice(0, 8).map((entry) => (
                 <View key={entry.id} style={styles.ledgerItem}>
                   <View style={styles.ledgerLeft}>
                     <Text style={styles.ledgerDesc}>{entry.description}</Text>
@@ -261,20 +283,30 @@ export default function App() {
           </>
         )}
 
-        {/* TAB 2: SEND MONEY (P2P ONLINE / OFFLINE) */}
+        {/* TAB 2: SEND MONEY */}
         {activeTab === 'send' && (
           <View style={styles.cardSection}>
-            <Text style={styles.tabHeading}>Send Money</Text>
-            <Text style={styles.tabSubheading}>Transfer to friend or merchant via Email / ID</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+              <View>
+                <Text style={styles.tabHeading}>Send Money</Text>
+                <Text style={styles.tabSubheading}>Transfer to friend or merchant</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.scanBadgeBtn}
+                onPress={() => setScannerModalVisible(true)}
+              >
+                <Text style={styles.scanBadgeText}>📷 Scan QR</Text>
+              </TouchableOpacity>
+            </View>
 
             {sendSuccessMsg && <Text style={styles.successBanner}>{sendSuccessMsg}</Text>}
 
-            <Text style={styles.inputLabel}>Recipient Email or User ID</Text>
+            <Text style={styles.inputLabel}>Recipient Email or Merchant ID</Text>
             <TextInput
               style={styles.textInput}
               value={recipientEmail}
               onChangeText={setRecipientEmail}
-              placeholder="e.g. alex@tapcash.io or usr_123"
+              placeholder="alex@tapcash.io or usr_merchant_77"
               placeholderTextColor={Colors.textMuted}
               autoCapitalize="none"
             />
@@ -294,31 +326,37 @@ export default function App() {
               style={styles.textInput}
               value={sendNote}
               onChangeText={setSendNote}
-              placeholder="Dinner, groceries, rent..."
+              placeholder="Coffee, dinner, groceries..."
               placeholderTextColor={Colors.textMuted}
             />
 
             <TouchableOpacity style={styles.primaryActionButton} onPress={handleSendP2P} disabled={isSending}>
-              {isSending ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryActionText}>🚀 Send ₹{sendAmount || '0.00'}</Text>}
+              {isSending ? <ActivityIndicator color="#000" /> : <Text style={styles.primaryActionText}>🚀 Send ₹{sendAmount || '0.00'}</Text>}
             </TouchableOpacity>
           </View>
         )}
 
-        {/* TAB 3: RECEIVE / POS QR MODE */}
+        {/* TAB 3: RECEIVE / DYNAMIC SCANNABLE QR */}
         {activeTab === 'receive' && (
           <View style={[styles.cardSection, { alignItems: 'center' }]}>
             <Text style={styles.tabHeading}>Receive Payment</Text>
-            <Text style={styles.tabSubheading}>Show this QR code to receive instant offline or online transfer</Text>
+            <Text style={styles.tabSubheading}>Scan this QR code from any camera/scanner to pay</Text>
 
-            <View style={styles.qrBox}>
-              <Text style={{ fontSize: 48 }}>📱</Text>
-              <Text style={styles.qrAmountText}>₹{receiveAmount}</Text>
+            {/* Real Dynamic Scannable QR Code Image */}
+            <View style={styles.realQrContainer}>
+              <Image
+                source={{ uri: qrCodeUrl }}
+                style={styles.realQrImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.qrAmountBadge}>₹{receiveAmount}</Text>
               <Text style={styles.qrMetaText}>{receiveNote}</Text>
-              <Text style={styles.qrIdText}>ID: usr_my_wallet_device_77</Text>
+              <Text style={styles.qrIdText}>ID: usr_merchant_77a9</Text>
             </View>
 
+            {/* Custom Amount Controls */}
             <View style={{ width: '100%', marginTop: 20 }}>
-              <Text style={styles.inputLabel}>Set Custom Receive Amount (₹)</Text>
+              <Text style={styles.inputLabel}>Set Receive Amount (₹)</Text>
               <TextInput
                 style={styles.textInput}
                 value={receiveAmount}
@@ -328,7 +366,7 @@ export default function App() {
                 placeholderTextColor={Colors.textMuted}
               />
 
-              <Text style={styles.inputLabel}>Purpose</Text>
+              <Text style={styles.inputLabel}>Payment Note</Text>
               <TextInput
                 style={styles.textInput}
                 value={receiveNote}
@@ -344,7 +382,7 @@ export default function App() {
         {activeTab === 'wallet' && (
           <View style={styles.cardSection}>
             <Text style={styles.tabHeading}>Wallet & Escrow</Text>
-            <Text style={styles.tabSubheading}>Add funds to wallet and manage offline escrow allocations</Text>
+            <Text style={styles.tabSubheading}>Add funds to wallet and manage offline balance</Text>
 
             <View style={styles.balanceCard}>
               <Text style={styles.balanceLabel}>Current Balance</Text>
@@ -378,7 +416,7 @@ export default function App() {
               disabled={isSyncing || pendingQueue.length === 0}
             >
               {isSyncing ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color="#000" />
               ) : (
                 <Text style={styles.primaryActionText}>🔄 Reconcile {pendingQueue.length} Vouchers with Go Backend</Text>
               )}
@@ -430,6 +468,45 @@ export default function App() {
           <Text style={[styles.navLabel, activeTab === 'sync' && styles.navLabelActive]}>Sync</Text>
         </TouchableOpacity>
       </View>
+
+      {/* QR Scanner Simulator Modal */}
+      <Modal visible={scannerModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>📷 Scan Merchant QR</Text>
+            <Text style={styles.modalSubtitle}>Point camera at Laptop POS or Merchant Code</Text>
+
+            <View style={styles.scannerViewport}>
+              <View style={styles.laserLine} />
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Align QR in frame</Text>
+            </View>
+
+            <Text style={[styles.inputLabel, { marginTop: 15 }]}>Simulate Detected QR Codes:</Text>
+            <TouchableOpacity
+              style={styles.scannedOptionBtn}
+              onPress={() => handleSimulateScan('150', 'Metro Coffee Store')}
+            >
+              <Text style={styles.scannedOptionTitle}>☕ Metro Coffee Store (₹150)</Text>
+              <Text style={styles.scannedOptionSub}>Match Laptop POS Terminal</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.scannedOptionBtn}
+              onPress={() => handleSimulateScan('350', 'Chai Point')}
+            >
+              <Text style={styles.scannedOptionTitle}>🍵 Chai Point (₹350)</Text>
+              <Text style={styles.scannedOptionSub}>P2M Merchant QR</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modalBtn, styles.cancelBtn, { marginTop: 10 }]}
+              onPress={() => setScannerModalVisible(false)}
+            >
+              <Text style={styles.modalBtnText}>Close Scanner</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Tap-to-Pay NFC Modal */}
       <Modal visible={tapModalVisible} transparent animationType="slide">
@@ -688,7 +765,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.textSecondary,
     marginTop: 4,
-    marginBottom: 20,
+    marginBottom: 15,
+  },
+  scanBadgeBtn: {
+    backgroundColor: '#06B6D4',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  scanBadgeText: {
+    color: '#000',
+    fontSize: 12,
+    fontWeight: '800',
   },
   inputLabel: {
     fontSize: 12,
@@ -728,31 +816,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
   },
-  qrBox: {
-    backgroundColor: Colors.background,
-    width: '100%',
-    padding: 24,
-    borderRadius: 20,
+  realQrContainer: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 24,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    justifyContent: 'center',
+    marginVertical: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
   },
-  qrAmountText: {
-    fontSize: 32,
+  realQrImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+  },
+  qrAmountBadge: {
+    fontSize: 26,
     fontWeight: '900',
-    color: Colors.primary,
+    color: '#09090b',
     marginTop: 8,
   },
   qrMetaText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginTop: 4,
+    fontSize: 12,
+    color: '#52525b',
+    marginTop: 2,
+    fontWeight: '600',
   },
   qrIdText: {
-    fontSize: 11,
-    color: Colors.textMuted,
+    fontSize: 10,
+    color: '#a1a1aa',
     fontFamily: 'monospace',
-    marginTop: 10,
+    marginTop: 4,
   },
   presetRow: {
     flexDirection: 'row',
@@ -838,6 +934,41 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '700',
   },
+  scannerViewport: {
+    height: 160,
+    backgroundColor: '#000',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#06B6D4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 10,
+    position: 'relative',
+  },
+  laserLine: {
+    width: '80%',
+    height: 2,
+    backgroundColor: '#06B6D4',
+    position: 'absolute',
+  },
+  scannedOptionBtn: {
+    backgroundColor: Colors.background,
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+  },
+  scannedOptionTitle: {
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  scannedOptionSub: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    marginTop: 2,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -860,7 +991,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.textSecondary,
     marginTop: 4,
-    marginBottom: 20,
+    marginBottom: 15,
   },
   resultMessage: {
     fontSize: 13,
