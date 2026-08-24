@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -14,6 +14,7 @@ import {
   Image,
   Platform,
 } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Colors } from './src/core/theme/colors';
 import { LocalDB, LocalLedgerEntry, PendingVoucher } from './src/core/database/sqlite';
 import { MockTapBridge } from './src/features/tap_to_pay/mockTapBridge';
@@ -27,15 +28,17 @@ export default function App() {
   const [pendingQueue, setPendingQueue] = useState<PendingVoucher[]>(LocalDB.getPendingQueue());
   const [isOfflineMode, setIsOfflineMode] = useState(false);
 
+  // Camera permissions
+  const [permission, requestPermission] = useCameraPermissions();
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scanned, setScanned] = useState(false);
+
   // Send Online / P2P State
   const [recipientEmail, setRecipientEmail] = useState('');
   const [sendAmount, setSendAmount] = useState('');
   const [sendNote, setSendNote] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendSuccessMsg, setSendSuccessMsg] = useState<string | null>(null);
-
-  // Scanner Modal State
-  const [scannerModalVisible, setScannerModalVisible] = useState(false);
 
   // Receive / POS State
   const [receiveAmount, setReceiveAmount] = useState('150');
@@ -60,16 +63,17 @@ export default function App() {
     setPendingQueue(LocalDB.getPendingQueue());
   };
 
-  // Dynamic QR Code URL encoder
+  // Real Dynamic QR Payload (Matches Web POS schema)
   const qrPayload = JSON.stringify({
-    type: 'TAPCASH_PAY_INTENT',
-    payee: 'usr_merchant_77a9',
-    name: 'Metro Coffee Store',
-    amount: receiveAmount,
+    type: 'TAPCASH_POS_INTENT',
+    merchantId: 'usr_merchant_77a9',
+    merchantName: 'Metro Coffee Roasters',
+    amountCents: Math.round((parseFloat(receiveAmount) || 0) * 100),
+    nonce: `nonce_${Date.now()}`,
     note: receiveNote,
     timestamp: Date.now(),
   });
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrPayload)}&bgcolor=ffffff&color=09090b&margin=2`;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(qrPayload)}&bgcolor=ffffff&color=09090b&margin=2`;
 
   // 1. Send Online P2P Transfer
   const handleSendP2P = async () => {
@@ -112,17 +116,49 @@ export default function App() {
     }, 800);
   };
 
-  // Simulate scanning QR Code
-  const handleSimulateScan = (scannedAmount: string, scannedMerchant: string) => {
-    setScannerModalVisible(false);
+  // 2. Real Camera Barcode Scanner Handler
+  const handleBarcodeScanned = ({ data }: { data: string }) => {
+    if (scanned) return;
+    setScanned(true);
+    setIsScannerOpen(false);
+
+    try {
+      // Try to parse TapCash Structured QR JSON
+      const parsed = JSON.parse(data);
+      if (parsed.type === 'TAPCASH_POS_INTENT' || parsed.type === 'TAPCASH_PAY_INTENT') {
+        const amt = parsed.amountCents ? (parsed.amountCents / 100).toString() : parsed.amount || '0';
+        const payee = parsed.merchantName || parsed.merchantId || parsed.payee || 'Merchant';
+        setActiveTab('send');
+        setRecipientEmail(payee);
+        setSendAmount(amt);
+        setSendNote(parsed.note || 'Scanned via Live Camera');
+        Alert.alert('QR Scanned Successfully! 🎉', `Merchant: ${payee}\nAmount: ₹${amt}`);
+        return;
+      }
+    } catch {
+      // Plain text or standard UPI QR string
+    }
+
+    // Fallback if plain text or raw string
     setActiveTab('send');
-    setRecipientEmail(scannedMerchant);
-    setSendAmount(scannedAmount);
-    setSendNote('Scanned via Dynamic QR');
-    Alert.alert('QR Code Scanned!', `Payment intent loaded: ₹${scannedAmount} to ${scannedMerchant}`);
+    setRecipientEmail(data.substring(0, 30));
+    setSendAmount('150');
+    Alert.alert('Code Scanned', `Scanned raw code: ${data}`);
   };
 
-  // 2. Top-Up Wallet Balance
+  const openCameraScanner = async () => {
+    if (!permission?.granted) {
+      const { granted } = await requestPermission();
+      if (!granted) {
+        Alert.alert('Permission Required', 'Camera permission is needed to scan payment QR codes.');
+        return;
+      }
+    }
+    setScanned(false);
+    setIsScannerOpen(true);
+  };
+
+  // 3. Top-Up Wallet Balance
   const handleTopUp = (amt: number) => {
     setIsToppingUp(true);
     setTimeout(() => {
@@ -145,7 +181,7 @@ export default function App() {
     }, 600);
   };
 
-  // 3. NFC Tap-to-Pay Beam
+  // 4. NFC Tap-to-Pay Beam
   const handleExecuteTap = async () => {
     const amountNum = parseFloat(tapAmount);
     if (isNaN(amountNum) || amountNum <= 0) return;
@@ -173,7 +209,7 @@ export default function App() {
     }
   };
 
-  // 4. Batch Sync to Backend
+  // 5. Batch Sync to Backend
   const handleSyncNow = async () => {
     if (pendingQueue.length === 0) return;
     setIsSyncing(true);
@@ -194,7 +230,7 @@ export default function App() {
       <View style={styles.header}>
         <View>
           <Text style={styles.appTitle}>TapCash</Text>
-          <Text style={styles.appSubtitle}>Offline NFC & Dynamic QR</Text>
+          <Text style={styles.appSubtitle}>Offline NFC & Real-Time QR</Text>
         </View>
         <TouchableOpacity
           style={[styles.networkBadge, isOfflineMode ? styles.badgeOffline : styles.badgeOnline]}
@@ -230,7 +266,7 @@ export default function App() {
                 <Text style={styles.quickActionLabel}>Send P2P</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.quickActionCard} onPress={() => setScannerModalVisible(true)}>
+              <TouchableOpacity style={styles.quickActionCard} onPress={openCameraScanner}>
                 <View style={[styles.iconCircle, { backgroundColor: '#06B6D4' }]}>
                   <Text style={styles.iconEmoji}>📷</Text>
                 </View>
@@ -294,9 +330,9 @@ export default function App() {
               </View>
               <TouchableOpacity
                 style={styles.scanBadgeBtn}
-                onPress={() => setScannerModalVisible(true)}
+                onPress={openCameraScanner}
               >
-                <Text style={styles.scanBadgeText}>📷 Scan QR</Text>
+                <Text style={styles.scanBadgeText}>📷 Live Camera Scan</Text>
               </TouchableOpacity>
             </View>
 
@@ -341,7 +377,7 @@ export default function App() {
         {activeTab === 'receive' && (
           <View style={[styles.cardSection, { alignItems: 'center' }]}>
             <Text style={styles.tabHeading}>Receive Payment</Text>
-            <Text style={styles.tabSubheading}>Scan this QR code from any camera/scanner to pay</Text>
+            <Text style={styles.tabSubheading}>Point any phone camera or TapCash app at this QR</Text>
 
             {/* Real Dynamic Scannable QR Code Image */}
             <View style={styles.realQrContainer}>
@@ -352,7 +388,7 @@ export default function App() {
               />
               <Text style={styles.qrAmountBadge}>₹{receiveAmount}</Text>
               <Text style={styles.qrMetaText}>{receiveNote}</Text>
-              <Text style={styles.qrIdText}>ID: usr_merchant_77a9</Text>
+              <Text style={styles.qrIdText}>Merchant: Metro Coffee Roasters</Text>
             </View>
 
             {/* Custom Amount Controls */}
@@ -470,43 +506,32 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* QR Scanner Simulator Modal */}
-      <Modal visible={scannerModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>📷 Scan Merchant QR</Text>
-            <Text style={styles.modalSubtitle}>Point camera at Laptop POS or Merchant Code</Text>
-
-            <View style={styles.scannerViewport}>
-              <View style={styles.laserLine} />
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Align QR in frame</Text>
-            </View>
-
-            <Text style={[styles.inputLabel, { marginTop: 15 }]}>Simulate Detected QR Codes:</Text>
-            <TouchableOpacity
-              style={styles.scannedOptionBtn}
-              onPress={() => handleSimulateScan('150', 'Metro Coffee Store')}
-            >
-              <Text style={styles.scannedOptionTitle}>☕ Metro Coffee Store (₹150)</Text>
-              <Text style={styles.scannedOptionSub}>Match Laptop POS Terminal</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.scannedOptionBtn}
-              onPress={() => handleSimulateScan('350', 'Chai Point')}
-            >
-              <Text style={styles.scannedOptionTitle}>🍵 Chai Point (₹350)</Text>
-              <Text style={styles.scannedOptionSub}>P2M Merchant QR</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.cancelBtn, { marginTop: 10 }]}
-              onPress={() => setScannerModalVisible(false)}
-            >
-              <Text style={styles.modalBtnText}>Close Scanner</Text>
+      {/* Real Camera Scanner Modal */}
+      <Modal visible={isScannerOpen} animationType="slide" onRequestClose={() => setIsScannerOpen(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
+          <View style={styles.scannerHeader}>
+            <Text style={styles.scannerTitle}>Point Camera at QR Code</Text>
+            <TouchableOpacity onPress={() => setIsScannerOpen(false)} style={styles.scannerCloseBtn}>
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>✕ Close</Text>
             </TouchableOpacity>
           </View>
-        </View>
+
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
+            facing="back"
+            barcodeScannerSettings={{
+              barcodeTypes: ['qr'],
+            }}
+            onBarcodeScanned={handleBarcodeScanned}
+          />
+
+          <View style={styles.scannerOverlay}>
+            <View style={styles.scannerBox}>
+              <View style={styles.laserLine} />
+            </View>
+            <Text style={styles.scannerHelperText}>Align QR code on laptop or device inside box</Text>
+          </View>
+        </SafeAreaView>
       </Modal>
 
       {/* Tap-to-Pay NFC Modal */}
@@ -774,7 +799,7 @@ const styles = StyleSheet.create({
   scanBadgeBtn: {
     backgroundColor: '#06B6D4',
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 12,
   },
   scanBadgeText: {
@@ -832,8 +857,8 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
   },
   realQrImage: {
-    width: 200,
-    height: 200,
+    width: 220,
+    height: 220,
     borderRadius: 12,
   },
   qrAmountBadge: {
@@ -849,9 +874,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   qrIdText: {
-    fontSize: 10,
-    color: '#a1a1aa',
-    fontFamily: 'monospace',
+    fontSize: 11,
+    color: '#71717a',
+    fontWeight: 'bold',
     marginTop: 4,
   },
   presetRow: {
@@ -938,40 +963,57 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '700',
   },
-  scannerViewport: {
-    height: 160,
-    backgroundColor: '#000',
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#06B6D4',
+  scannerHeader: {
+    position: 'absolute',
+    top: 40,
+    left: 20,
+    right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  scannerTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  scannerCloseBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 10,
-    position: 'relative',
+  },
+  scannerBox: {
+    width: 250,
+    height: 250,
+    borderWidth: 2,
+    borderColor: '#06B6D4',
+    borderRadius: 24,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   laserLine: {
-    width: '80%',
+    width: '100%',
     height: 2,
     backgroundColor: '#06B6D4',
-    position: 'absolute',
   },
-  scannedOptionBtn: {
-    backgroundColor: Colors.background,
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-  },
-  scannedOptionTitle: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  scannedOptionSub: {
-    color: Colors.textSecondary,
-    fontSize: 11,
-    marginTop: 2,
+  scannerHelperText: {
+    color: '#fff',
+    marginTop: 20,
+    fontSize: 13,
+    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
   modalOverlay: {
     flex: 1,
