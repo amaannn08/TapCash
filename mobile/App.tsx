@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -15,6 +15,25 @@ import {
   Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import {
+  Home,
+  Send,
+  QrCode,
+  CreditCard,
+  RefreshCw,
+  Scan,
+  Zap,
+  Lock,
+  ArrowUpRight,
+  ArrowDownLeft,
+  ShieldCheck,
+  CheckCircle2,
+  Clock,
+  X,
+  Wallet,
+  Building2,
+  Coffee,
+} from 'lucide-react-native';
 import { Colors } from './src/core/theme/colors';
 import { LocalDB, LocalLedgerEntry, PendingVoucher } from './src/core/database/sqlite';
 import { MockTapBridge } from './src/features/tap_to_pay/mockTapBridge';
@@ -63,7 +82,7 @@ export default function App() {
     setPendingQueue(LocalDB.getPendingQueue());
   };
 
-  // Real Dynamic QR Payload (Matches Web POS schema)
+  // Real Dynamic QR Payload
   const qrPayload = JSON.stringify({
     type: 'TAPCASH_POS_INTENT',
     merchantId: 'usr_merchant_77a9',
@@ -109,7 +128,7 @@ export default function App() {
       LocalDB.recordOfflineDebit(voucher, `P2P Sent to ${recipientEmail} (${sendNote || 'Transfer'})`);
       setIsSending(false);
       refreshState();
-      setSendSuccessMsg(`✅ ₹${amountNum.toFixed(2)} sent successfully to ${recipientEmail}!`);
+      setSendSuccessMsg(`₹${amountNum.toFixed(2)} sent successfully to ${recipientEmail}!`);
       setSendAmount('');
       setRecipientEmail('');
       setSendNote('');
@@ -123,7 +142,6 @@ export default function App() {
     setIsScannerOpen(false);
 
     try {
-      // Try to parse TapCash Structured QR JSON
       const parsed = JSON.parse(data);
       if (parsed.type === 'TAPCASH_POS_INTENT' || parsed.type === 'TAPCASH_PAY_INTENT') {
         const amt = parsed.amountCents ? (parsed.amountCents / 100).toString() : parsed.amount || '0';
@@ -136,10 +154,9 @@ export default function App() {
         return;
       }
     } catch {
-      // Plain text or standard UPI QR string
+      // Raw string fallback
     }
 
-    // Fallback if plain text or raw string
     setActiveTab('send');
     setRecipientEmail(data.substring(0, 30));
     setSendAmount('150');
@@ -199,13 +216,13 @@ export default function App() {
     refreshState();
 
     if (res.success) {
-      setTapResultMsg(`✅ Settled in ${res.latencyMs}ms! (Ed25519 Signed Voucher Created)`);
+      setTapResultMsg(`Settled in ${res.latencyMs}ms! (Ed25519 Signed Voucher Created)`);
       setTimeout(() => {
         setTapModalVisible(false);
         setTapResultMsg(null);
       }, 1500);
     } else {
-      setTapResultMsg(`❌ Failed: ${res.error}`);
+      setTapResultMsg(`Failed: ${res.error}`);
     }
   };
 
@@ -226,93 +243,123 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      {/* Header with Safe Status Bar Offset */}
+      {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.appTitle}>TapCash</Text>
-          <Text style={styles.appSubtitle}>Offline NFC & Real-Time QR</Text>
+        <View style={styles.brandRow}>
+          <View style={styles.logoBadge}>
+            <Zap size={18} color="#10B981" />
+          </View>
+          <View>
+            <Text style={styles.appTitle}>TapCash</Text>
+            <Text style={styles.appSubtitle}>Hardware-Grade NFC & Offline Ledger</Text>
+          </View>
         </View>
         <TouchableOpacity
           style={[styles.networkBadge, isOfflineMode ? styles.badgeOffline : styles.badgeOnline]}
           onPress={() => setIsOfflineMode(!isOfflineMode)}
         >
-          <Text style={styles.networkBadgeText}>
-            {isOfflineMode ? '🔴 Offline' : '🟢 Online'}
+          <View style={[styles.statusDot, isOfflineMode ? styles.dotOffline : styles.dotOnline]} />
+          <Text style={[styles.networkBadgeText, isOfflineMode ? styles.textOffline : styles.textOnline]}>
+            {isOfflineMode ? 'Offline' : 'Online'}
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* Main Tab Content */}
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* TAB 1: HOME / DASHBOARD */}
         {activeTab === 'home' && (
           <>
             {/* Balance Card */}
             <View style={styles.balanceCard}>
-              <Text style={styles.balanceLabel}>Total Available Balance</Text>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.balanceLabel}>Available Balance</Text>
+                <View style={styles.escrowChip}>
+                  <Lock size={12} color="#10B981" />
+                  <Text style={styles.escrowText}>Escrow Active</Text>
+                </View>
+              </View>
               <Text style={styles.balanceAmount}>₹{(balance / 100).toFixed(2)}</Text>
               <View style={styles.securityRow}>
-                <Text style={styles.securityText}>🔒 Ed25519 Keystore Active</Text>
-                <Text style={styles.seqText}>Seq: #{LocalDB.getSequence()}</Text>
+                <View style={styles.keyBadge}>
+                  <ShieldCheck size={14} color="#10B981" />
+                  <Text style={styles.securityText}>Ed25519 Secure Enclave</Text>
+                </View>
+                <Text style={styles.seqText}>Seq #{LocalDB.getSequence()}</Text>
               </View>
             </View>
 
-            {/* Quick Actions Grid */}
+            {/* Quick Actions Grid (Lucide Icons) */}
             <View style={styles.quickGrid}>
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setActiveTab('send')}>
-                <View style={[styles.iconCircle, { backgroundColor: '#3B82F6' }]}>
-                  <Text style={styles.iconEmoji}>↗</Text>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(59, 130, 246, 0.15)', borderColor: 'rgba(59, 130, 246, 0.4)' }]}>
+                  <ArrowUpRight size={22} color="#60A5FA" />
                 </View>
                 <Text style={styles.quickActionLabel}>Send P2P</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.quickActionCard} onPress={openCameraScanner}>
-                <View style={[styles.iconCircle, { backgroundColor: '#06B6D4' }]}>
-                  <Text style={styles.iconEmoji}>📷</Text>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(6, 182, 212, 0.15)', borderColor: 'rgba(6, 182, 212, 0.4)' }]}>
+                  <Scan size={22} color="#22D3EE" />
                 </View>
                 <Text style={styles.quickActionLabel}>Scan QR</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setActiveTab('receive')}>
-                <View style={[styles.iconCircle, { backgroundColor: '#10B981' }]}>
-                  <Text style={styles.iconEmoji}>↙</Text>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: 'rgba(16, 185, 129, 0.4)' }]}>
+                  <ArrowDownLeft size={22} color="#34D399" />
                 </View>
-                <Text style={styles.quickActionLabel}>Receive QR</Text>
+                <Text style={styles.quickActionLabel}>Receive</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.quickActionCard} onPress={() => setTapModalVisible(true)}>
-                <View style={[styles.iconCircle, { backgroundColor: '#8B5CF6' }]}>
-                  <Text style={styles.iconEmoji}>⚡</Text>
+                <View style={[styles.iconCircle, { backgroundColor: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)' }]}>
+                  <Zap size={22} color="#A78BFA" />
                 </View>
                 <Text style={styles.quickActionLabel}>Tap-to-Pay</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Sync Queue Alert */}
+            {/* Sync Queue Alert Banner */}
             {pendingQueue.length > 0 && (
               <TouchableOpacity style={styles.syncBanner} onPress={() => setActiveTab('sync')}>
-                <View style={styles.syncBannerLeft}>
-                  <Text style={styles.syncBannerTitle}>⏳ {pendingQueue.length} Pending Vouchers</Text>
-                  <Text style={styles.syncBannerDesc}>Tap to view offline ledger & reconcile</Text>
+                <View style={styles.syncIconBox}>
+                  <Clock size={20} color="#F59E0B" />
                 </View>
-                <Text style={styles.syncArrow}>→</Text>
+                <View style={styles.syncBannerLeft}>
+                  <Text style={styles.syncBannerTitle}>{pendingQueue.length} Pending Offline Vouchers</Text>
+                  <Text style={styles.syncBannerDesc}>Tap to inspect cryptographic queue</Text>
+                </View>
+                <RefreshCw size={16} color="#A1A1AA" />
               </TouchableOpacity>
             )}
 
-            {/* Immutable Ledger Activity */}
+            {/* Transactions Activity */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Recent Transactions</Text>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent Activity</Text>
+                <Text style={styles.sectionCount}>{history.length} transactions</Text>
+              </View>
               {history.slice(0, 8).map((entry) => (
                 <View key={entry.id} style={styles.ledgerItem}>
-                  <View style={styles.ledgerLeft}>
-                    <Text style={styles.ledgerDesc}>{entry.description}</Text>
-                    <Text style={styles.ledgerTime}>{new Date(entry.timestamp).toLocaleTimeString()}</Text>
+                  <View style={styles.itemLeftGroup}>
+                    <View style={[styles.txTypeIcon, entry.type === 'DEBIT' ? styles.txDebit : styles.txCredit]}>
+                      {entry.type === 'DEBIT' ? (
+                        <ArrowUpRight size={16} color="#F87171" />
+                      ) : (
+                        <ArrowDownLeft size={16} color="#34D399" />
+                      )}
+                    </View>
+                    <View>
+                      <Text style={styles.ledgerDesc}>{entry.description}</Text>
+                      <Text style={styles.ledgerTime}>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                    </View>
                   </View>
                   <View style={styles.ledgerRight}>
                     <Text style={[styles.ledgerAmount, entry.type === 'DEBIT' ? styles.debitText : styles.creditText]}>
                       {entry.type === 'DEBIT' ? '-' : '+'}₹{(entry.amountCents / 100).toFixed(2)}
                     </Text>
-                    <Text style={styles.ledgerBal}>Bal: ₹{(entry.balanceAfterCents / 100).toFixed(2)}</Text>
+                    <Text style={styles.ledgerBal}>₹{(entry.balanceAfterCents / 100).toFixed(2)}</Text>
                   </View>
                 </View>
               ))}
@@ -323,22 +370,25 @@ export default function App() {
         {/* TAB 2: SEND MONEY */}
         {activeTab === 'send' && (
           <View style={styles.cardSection}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+            <View style={styles.tabHeaderRow}>
               <View>
                 <Text style={styles.tabHeading}>Send Money</Text>
-                <Text style={styles.tabSubheading}>Transfer to friend or merchant</Text>
+                <Text style={styles.tabSubheading}>Instant offline or online transfer</Text>
               </View>
-              <TouchableOpacity
-                style={styles.scanBadgeBtn}
-                onPress={openCameraScanner}
-              >
-                <Text style={styles.scanBadgeText}>📷 Live Camera Scan</Text>
+              <TouchableOpacity style={styles.scanBadgeBtn} onPress={openCameraScanner}>
+                <Scan size={14} color="#000" />
+                <Text style={styles.scanBadgeText}>Camera</Text>
               </TouchableOpacity>
             </View>
 
-            {sendSuccessMsg && <Text style={styles.successBanner}>{sendSuccessMsg}</Text>}
+            {sendSuccessMsg && (
+              <View style={styles.successBanner}>
+                <CheckCircle2 size={16} color="#10B981" />
+                <Text style={styles.successBannerText}>{sendSuccessMsg}</Text>
+              </View>
+            )}
 
-            <Text style={styles.inputLabel}>Recipient Email or Merchant ID</Text>
+            <Text style={styles.inputLabel}>Recipient Email / Merchant ID</Text>
             <TextInput
               style={styles.textInput}
               value={recipientEmail}
@@ -363,12 +413,19 @@ export default function App() {
               style={styles.textInput}
               value={sendNote}
               onChangeText={setSendNote}
-              placeholder="Coffee, dinner, groceries..."
+              placeholder="Chai, lunch, groceries..."
               placeholderTextColor={Colors.textMuted}
             />
 
             <TouchableOpacity style={styles.primaryActionButton} onPress={handleSendP2P} disabled={isSending}>
-              {isSending ? <ActivityIndicator color="#000" /> : <Text style={styles.primaryActionText}>🚀 Send ₹{sendAmount || '0.00'}</Text>}
+              {isSending ? (
+                <ActivityIndicator color="#000" />
+              ) : (
+                <View style={styles.btnRow}>
+                  <Send size={18} color="#000" />
+                  <Text style={styles.primaryActionText}>Send ₹{sendAmount || '0.00'}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
         )}
@@ -377,23 +434,22 @@ export default function App() {
         {activeTab === 'receive' && (
           <View style={[styles.cardSection, { alignItems: 'center' }]}>
             <Text style={styles.tabHeading}>Receive Payment</Text>
-            <Text style={styles.tabSubheading}>Point any phone camera or TapCash app at this QR</Text>
+            <Text style={styles.tabSubheading}>Scan with any camera or TapCash app</Text>
 
-            {/* Real Dynamic Scannable QR Code Image */}
+            {/* Real Dynamic Scannable QR Code */}
             <View style={styles.realQrContainer}>
-              <Image
-                source={{ uri: qrCodeUrl }}
-                style={styles.realQrImage}
-                resizeMode="contain"
-              />
+              <Image source={{ uri: qrCodeUrl }} style={styles.realQrImage} resizeMode="contain" />
               <Text style={styles.qrAmountBadge}>₹{receiveAmount}</Text>
               <Text style={styles.qrMetaText}>{receiveNote}</Text>
-              <Text style={styles.qrIdText}>Merchant: Metro Coffee Roasters</Text>
+              <View style={styles.merchantBadge}>
+                <Coffee size={12} color="#71717A" />
+                <Text style={styles.qrIdText}>Metro Coffee Roasters</Text>
+              </View>
             </View>
 
             {/* Custom Amount Controls */}
             <View style={{ width: '100%', marginTop: 20 }}>
-              <Text style={styles.inputLabel}>Set Receive Amount (₹)</Text>
+              <Text style={styles.inputLabel}>Set Amount (₹)</Text>
               <TextInput
                 style={styles.textInput}
                 value={receiveAmount}
@@ -419,14 +475,14 @@ export default function App() {
         {activeTab === 'wallet' && (
           <View style={styles.cardSection}>
             <Text style={styles.tabHeading}>Wallet & Escrow</Text>
-            <Text style={styles.tabSubheading}>Add funds to wallet and manage offline balance</Text>
+            <Text style={styles.tabSubheading}>Add funds to offline double-entry vault</Text>
 
             <View style={styles.balanceCard}>
-              <Text style={styles.balanceLabel}>Current Balance</Text>
+              <Text style={styles.balanceLabel}>Vault Balance</Text>
               <Text style={styles.balanceAmount}>₹{(balance / 100).toFixed(2)}</Text>
             </View>
 
-            <Text style={styles.sectionTitle}>Quick Top-Up</Text>
+            <Text style={styles.sectionTitle}>Instant Top-Up</Text>
             <View style={styles.presetRow}>
               <TouchableOpacity style={styles.presetBtn} onPress={() => handleTopUp(500)}>
                 <Text style={styles.presetText}>+ ₹500</Text>
@@ -445,31 +501,41 @@ export default function App() {
         {activeTab === 'sync' && (
           <View style={styles.cardSection}>
             <Text style={styles.tabHeading}>Offline Reconciliation Hub</Text>
-            <Text style={styles.tabSubheading}>Vouchers signed offline awaiting batch submission</Text>
+            <Text style={styles.tabSubheading}>Cryptographically signed vouchers</Text>
 
             <TouchableOpacity
-              style={[styles.primaryActionButton, { backgroundColor: pendingQueue.length > 0 ? Colors.primary : Colors.surfaceBorder }]}
+              style={[styles.primaryActionButton, { backgroundColor: pendingQueue.length > 0 ? '#10B981' : '#27272A' }]}
               onPress={handleSyncNow}
               disabled={isSyncing || pendingQueue.length === 0}
             >
               {isSyncing ? (
                 <ActivityIndicator color="#000" />
               ) : (
-                <Text style={styles.primaryActionText}>🔄 Reconcile {pendingQueue.length} Vouchers with Go Backend</Text>
+                <View style={styles.btnRow}>
+                  <RefreshCw size={18} color={pendingQueue.length > 0 ? '#000' : '#71717A'} />
+                  <Text style={[styles.primaryActionText, { color: pendingQueue.length > 0 ? '#000' : '#71717A' }]}>
+                    Reconcile {pendingQueue.length} Vouchers
+                  </Text>
+                </View>
               )}
             </TouchableOpacity>
 
-            <View style={{ marginTop: 20 }}>
-              <Text style={styles.sectionTitle}>Pending Voucher Queue ({pendingQueue.length})</Text>
+            <View style={{ marginTop: 24 }}>
+              <Text style={styles.sectionTitle}>Voucher Ledger Queue ({pendingQueue.length})</Text>
               {pendingQueue.length === 0 ? (
-                <Text style={{ color: Colors.textMuted, fontStyle: 'italic', marginTop: 10 }}>No pending offline vouchers. All transactions settled.</Text>
+                <View style={styles.emptyQueueBox}>
+                  <CheckCircle2 size={32} color="#10B981" />
+                  <Text style={styles.emptyQueueText}>All offline transactions reconciled with Go backend.</Text>
+                </View>
               ) : (
                 pendingQueue.map((v) => (
                   <View key={v.voucherId} style={styles.voucherItem}>
-                    <Text style={styles.voucherTitle}>{v.voucherId}</Text>
+                    <View style={styles.voucherHeaderRow}>
+                      <Text style={styles.voucherTitle}>{v.voucherId}</Text>
+                      <Text style={styles.voucherAmount}>₹{(v.amountCents / 100).toFixed(2)}</Text>
+                    </View>
                     <Text style={styles.voucherSub}>Payee: {v.payeeId} | Seq: #{v.sequenceNumber}</Text>
-                    <Text style={styles.voucherAmount}>Amount: ₹{(v.amountCents / 100).toFixed(2)}</Text>
-                    <Text style={styles.voucherSig}>Sig: {v.signature.substring(0, 30)}...</Text>
+                    <Text style={styles.voucherSig}>Sig: {v.signature.substring(0, 28)}...</Text>
                   </View>
                 ))
               )}
@@ -481,27 +547,27 @@ export default function App() {
       {/* Bottom Navigation Bar */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('home')}>
-          <Text style={[styles.navIcon, activeTab === 'home' && styles.navActive]}>🏠</Text>
+          <Home size={22} color={activeTab === 'home' ? '#10B981' : '#71717A'} />
           <Text style={[styles.navLabel, activeTab === 'home' && styles.navLabelActive]}>Home</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('send')}>
-          <Text style={[styles.navIcon, activeTab === 'send' && styles.navActive]}>↗</Text>
+          <Send size={22} color={activeTab === 'send' ? '#10B981' : '#71717A'} />
           <Text style={[styles.navLabel, activeTab === 'send' && styles.navLabelActive]}>Send</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('receive')}>
-          <Text style={[styles.navIcon, activeTab === 'receive' && styles.navActive]}>↙</Text>
+          <QrCode size={22} color={activeTab === 'receive' ? '#10B981' : '#71717A'} />
           <Text style={[styles.navLabel, activeTab === 'receive' && styles.navLabelActive]}>Receive</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('wallet')}>
-          <Text style={[styles.navIcon, activeTab === 'wallet' && styles.navActive]}>💳</Text>
+          <Wallet size={22} color={activeTab === 'wallet' ? '#10B981' : '#71717A'} />
           <Text style={[styles.navLabel, activeTab === 'wallet' && styles.navLabelActive]}>Wallet</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.navItem} onPress={() => setActiveTab('sync')}>
-          <Text style={[styles.navIcon, activeTab === 'sync' && styles.navActive]}>🔄</Text>
+          <RefreshCw size={22} color={activeTab === 'sync' ? '#10B981' : '#71717A'} />
           <Text style={[styles.navLabel, activeTab === 'sync' && styles.navLabelActive]}>Sync</Text>
         </TouchableOpacity>
       </View>
@@ -510,9 +576,9 @@ export default function App() {
       <Modal visible={isScannerOpen} animationType="slide" onRequestClose={() => setIsScannerOpen(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
           <View style={styles.scannerHeader}>
-            <Text style={styles.scannerTitle}>Point Camera at QR Code</Text>
+            <Text style={styles.scannerTitle}>Scan QR Code</Text>
             <TouchableOpacity onPress={() => setIsScannerOpen(false)} style={styles.scannerCloseBtn}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>✕ Close</Text>
+              <X size={18} color="#fff" />
             </TouchableOpacity>
           </View>
 
@@ -529,7 +595,7 @@ export default function App() {
             <View style={styles.scannerBox}>
               <View style={styles.laserLine} />
             </View>
-            <Text style={styles.scannerHelperText}>Align QR code on laptop or device inside box</Text>
+            <Text style={styles.scannerHelperText}>Point camera at Merchant POS screen or QR</Text>
           </View>
         </SafeAreaView>
       </Modal>
@@ -538,8 +604,16 @@ export default function App() {
       <Modal visible={tapModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>NFC Tap to Pay</Text>
-            <Text style={styles.modalSubtitle}>Hold device near merchant terminal</Text>
+            <View style={styles.modalHeaderRow}>
+              <View style={styles.modalHeaderLeft}>
+                <Zap size={20} color="#10B981" />
+                <Text style={styles.modalTitle}>NFC Tap to Pay</Text>
+              </View>
+              <TouchableOpacity onPress={() => setTapModalVisible(false)}>
+                <X size={20} color="#71717A" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalSubtitle}>Hold phone near merchant terminal</Text>
 
             <Text style={styles.inputLabel}>Merchant</Text>
             <TextInput
@@ -568,7 +642,7 @@ export default function App() {
                 onPress={() => setTapModalVisible(false)}
                 disabled={isProcessingTap}
               >
-                <Text style={styles.modalBtnText}>Cancel</Text>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -576,7 +650,7 @@ export default function App() {
                 onPress={handleExecuteTap}
                 disabled={isProcessingTap}
               >
-                {isProcessingTap ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnText}>Simulate Tap</Text>}
+                {isProcessingTap ? <ActivityIndicator color="#000" /> : <Text style={styles.confirmBtnText}>Simulate Tap</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -589,7 +663,7 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#09090B',
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 8 : 0,
   },
   header: {
@@ -600,74 +674,139 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 10 : 8,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceBorder,
-    backgroundColor: Colors.background,
+    borderBottomColor: '#18181B',
+    backgroundColor: '#09090B',
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  logoBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   appTitle: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '900',
-    color: Colors.textPrimary,
-    letterSpacing: 0.5,
+    color: '#FAFAFA',
+    letterSpacing: 0.3,
   },
   appSubtitle: {
     fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 2,
+    color: '#71717A',
   },
   networkBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 20,
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  dotOnline: {
+    backgroundColor: '#10B981',
+  },
+  dotOffline: {
+    backgroundColor: '#EF4444',
   },
   badgeOffline: {
-    backgroundColor: '#3F1D1D',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   badgeOnline: {
-    backgroundColor: '#064E3B',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   networkBadgeText: {
-    color: Colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  textOnline: {
+    color: '#34D399',
+  },
+  textOffline: {
+    color: '#F87171',
   },
   scrollContent: {
     padding: 20,
     paddingBottom: 110,
   },
   balanceCard: {
-    backgroundColor: Colors.surface,
-    padding: 24,
-    borderRadius: 20,
+    backgroundColor: '#18181B',
+    padding: 22,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    borderColor: '#27272A',
     marginBottom: 20,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   balanceLabel: {
     fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '500',
+    color: '#A1A1AA',
+    fontWeight: '600',
+  },
+  escrowChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  escrowText: {
+    color: '#34D399',
+    fontSize: 11,
+    fontWeight: '700',
   },
   balanceAmount: {
     fontSize: 38,
     fontWeight: '900',
-    color: Colors.textPrimary,
-    marginVertical: 8,
+    color: '#FAFAFA',
+    marginVertical: 10,
     letterSpacing: -1,
   },
   securityRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 6,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#27272A',
+    paddingTop: 12,
+    marginTop: 4,
+  },
+  keyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   securityText: {
     fontSize: 12,
-    color: Colors.primary,
+    color: '#34D399',
     fontWeight: '600',
   },
   seqText: {
     fontSize: 12,
-    color: Colors.textMuted,
-    fontWeight: '600',
+    color: '#71717A',
+    fontWeight: '700',
   },
   quickGrid: {
     flexDirection: 'row',
@@ -679,125 +818,156 @@ const styles = StyleSheet.create({
     width: '22%',
   },
   iconCircle: {
-    width: 52,
-    height: 52,
+    width: 54,
+    height: 54,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-  },
-  iconEmoji: {
-    fontSize: 22,
-    color: '#fff',
-    fontWeight: 'bold',
+    borderWidth: 1,
   },
   quickActionLabel: {
     fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textPrimary,
+    fontWeight: '700',
+    color: '#D4D4D8',
   },
   syncBanner: {
-    backgroundColor: '#27272A',
+    backgroundColor: '#18181B',
     padding: 16,
-    borderRadius: 16,
+    borderRadius: 18,
     marginBottom: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.warning,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    gap: 12,
+  },
+  syncIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   syncBannerLeft: {
     flex: 1,
   },
   syncBannerTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    color: Colors.textPrimary,
+    color: '#FAFAFA',
   },
   syncBannerDesc: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 3,
-  },
-  syncArrow: {
-    fontSize: 18,
-    color: Colors.textPrimary,
-    fontWeight: 'bold',
+    fontSize: 11,
+    color: '#A1A1AA',
+    marginTop: 2,
   },
   section: {
-    marginTop: 10,
+    marginTop: 6,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: 12,
+    fontWeight: '800',
+    color: '#FAFAFA',
+  },
+  sectionCount: {
+    fontSize: 12,
+    color: '#71717A',
+    fontWeight: '600',
   },
   ledgerItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    backgroundColor: '#18181B',
     padding: 14,
-    borderRadius: 14,
+    borderRadius: 16,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    borderColor: '#27272A',
   },
-  ledgerLeft: {
+  itemLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     flex: 1,
+  },
+  txTypeIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  txDebit: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  txCredit: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
   },
   ledgerRight: {
     alignItems: 'flex-end',
   },
   ledgerDesc: {
     fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textPrimary,
+    fontWeight: '700',
+    color: '#FAFAFA',
   },
   ledgerTime: {
     fontSize: 11,
-    color: Colors.textMuted,
-    marginTop: 4,
+    color: '#71717A',
+    marginTop: 3,
   },
   ledgerAmount: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   debitText: {
-    color: Colors.danger,
+    color: '#F87171',
   },
   creditText: {
-    color: Colors.success,
+    color: '#34D399',
   },
   ledgerBal: {
     fontSize: 11,
-    color: Colors.textMuted,
-    marginTop: 4,
+    color: '#71717A',
+    marginTop: 3,
   },
   cardSection: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 20,
+    backgroundColor: '#18181B',
+    borderRadius: 24,
+    padding: 22,
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    borderColor: '#27272A',
+  },
+  tabHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   tabHeading: {
     fontSize: 20,
-    fontWeight: '800',
-    color: Colors.textPrimary,
+    fontWeight: '900',
+    color: '#FAFAFA',
   },
   tabSubheading: {
     fontSize: 13,
-    color: Colors.textSecondary,
-    marginTop: 4,
-    marginBottom: 15,
+    color: '#71717A',
+    marginTop: 3,
   },
   scanBadgeBtn: {
-    backgroundColor: '#06B6D4',
+    backgroundColor: '#22D3EE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
@@ -809,52 +979,67 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-    marginBottom: 6,
+    fontWeight: '700',
+    color: '#A1A1AA',
+    marginBottom: 8,
+    marginTop: 6,
   },
   textInput: {
-    backgroundColor: Colors.background,
+    backgroundColor: '#09090B',
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: 12,
-    padding: 12,
-    color: Colors.textPrimary,
+    borderColor: '#27272A',
+    borderRadius: 14,
+    padding: 14,
+    color: '#FAFAFA',
     fontSize: 15,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   primaryActionButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 14,
+    backgroundColor: '#10B981',
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 8,
+    shadowColor: '#10B981',
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  btnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   primaryActionText: {
     color: '#000',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   successBanner: {
-    backgroundColor: '#064E3B',
-    color: '#A7F3D0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 14,
     marginBottom: 16,
-    fontWeight: '600',
+  },
+  successBannerText: {
+    color: '#34D399',
+    fontWeight: '700',
     fontSize: 13,
-    textAlign: 'center',
   },
   realQrContainer: {
-    backgroundColor: '#fff',
-    padding: 16,
+    backgroundColor: '#FFFFFF',
+    padding: 18,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 10,
+    marginVertical: 12,
     shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
   },
   realQrImage: {
     width: 220,
@@ -864,68 +1049,88 @@ const styles = StyleSheet.create({
   qrAmountBadge: {
     fontSize: 26,
     fontWeight: '900',
-    color: '#09090b',
-    marginTop: 8,
+    color: '#09090B',
+    marginTop: 10,
   },
   qrMetaText: {
     fontSize: 12,
-    color: '#52525b',
+    color: '#52525B',
     marginTop: 2,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  merchantBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
   },
   qrIdText: {
     fontSize: 11,
-    color: '#71717a',
-    fontWeight: 'bold',
-    marginTop: 4,
+    color: '#71717A',
+    fontWeight: '700',
   },
   presetRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 10,
+    marginTop: 8,
   },
   presetBtn: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#09090B',
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    borderColor: '#27272A',
   },
   presetText: {
-    color: Colors.primary,
-    fontWeight: '700',
+    color: '#10B981',
+    fontWeight: '800',
     fontSize: 14,
   },
+  emptyQueueBox: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    gap: 10,
+  },
+  emptyQueueText: {
+    color: '#71717A',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   voucherItem: {
-    backgroundColor: Colors.background,
-    padding: 12,
-    borderRadius: 12,
+    backgroundColor: '#09090B',
+    padding: 14,
+    borderRadius: 16,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    borderColor: '#27272A',
+  },
+  voucherHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   voucherTitle: {
     fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textPrimary,
+    fontWeight: '800',
+    color: '#FAFAFA',
     fontFamily: 'monospace',
   },
   voucherSub: {
     fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 2,
+    color: '#71717A',
+    marginTop: 4,
   },
   voucherAmount: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.primary,
-    marginTop: 4,
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#10B981',
   },
   voucherSig: {
     fontSize: 10,
-    color: Colors.textMuted,
+    color: '#52525B',
     fontFamily: 'monospace',
     marginTop: 4,
   },
@@ -935,9 +1140,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 75,
-    backgroundColor: Colors.surface,
+    backgroundColor: '#09090B',
     borderTopWidth: 1,
-    borderTopColor: Colors.surfaceBorder,
+    borderTopColor: '#18181B',
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
@@ -945,27 +1150,20 @@ const styles = StyleSheet.create({
   },
   navItem: {
     alignItems: 'center',
-  },
-  navIcon: {
-    fontSize: 20,
-    color: Colors.textMuted,
+    gap: 4,
   },
   navLabel: {
     fontSize: 11,
-    color: Colors.textMuted,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  navActive: {
-    color: Colors.primary,
+    color: '#71717A',
+    fontWeight: '600',
   },
   navLabelActive: {
-    color: Colors.primary,
-    fontWeight: '700',
+    color: '#10B981',
+    fontWeight: '800',
   },
   scannerHeader: {
     position: 'absolute',
-    top: 40,
+    top: 45,
     left: 20,
     right: 20,
     zIndex: 10,
@@ -975,13 +1173,12 @@ const styles = StyleSheet.create({
   },
   scannerTitle: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
   },
   scannerCloseBtn: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    padding: 8,
     borderRadius: 20,
   },
   scannerOverlay: {
@@ -993,7 +1190,7 @@ const styles = StyleSheet.create({
     width: 250,
     height: 250,
     borderWidth: 2,
-    borderColor: '#06B6D4',
+    borderColor: '#22D3EE',
     borderRadius: 24,
     backgroundColor: 'transparent',
     overflow: 'hidden',
@@ -1003,46 +1200,56 @@ const styles = StyleSheet.create({
   laserLine: {
     width: '100%',
     height: 2,
-    backgroundColor: '#06B6D4',
+    backgroundColor: '#22D3EE',
   },
   scannerHelperText: {
     color: '#fff',
     marginTop: 20,
     fontSize: 13,
-    fontWeight: '600',
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    fontWeight: '700',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: Colors.surface,
+    backgroundColor: '#18181B',
     padding: 24,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    borderColor: '#27272A',
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FAFAFA',
   },
   modalSubtitle: {
     fontSize: 13,
-    color: Colors.textSecondary,
+    color: '#71717A',
     marginTop: 4,
-    marginBottom: 15,
+    marginBottom: 16,
   },
   resultMessage: {
     fontSize: 13,
-    fontWeight: '600',
-    color: Colors.primary,
+    fontWeight: '700',
+    color: '#34D399',
     textAlign: 'center',
     marginVertical: 10,
   },
@@ -1053,19 +1260,24 @@ const styles = StyleSheet.create({
   },
   modalBtn: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 15,
+    borderRadius: 16,
     alignItems: 'center',
   },
   cancelBtn: {
-    backgroundColor: Colors.surfaceBorder,
+    backgroundColor: '#27272A',
   },
   confirmBtn: {
-    backgroundColor: Colors.primary,
+    backgroundColor: '#10B981',
   },
-  modalBtnText: {
-    color: '#fff',
+  cancelBtnText: {
+    color: '#A1A1AA',
     fontSize: 14,
     fontWeight: '700',
+  },
+  confirmBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });
