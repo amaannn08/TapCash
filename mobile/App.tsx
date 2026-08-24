@@ -12,6 +12,7 @@ import {
   StatusBar,
   Alert,
   Image,
+  Platform,
 } from 'react-native';
 import { Colors } from './src/core/theme/colors';
 import { LocalDB, LocalLedgerEntry, PendingVoucher } from './src/core/database/sqlite';
@@ -189,7 +190,7 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      {/* Header */}
+      {/* Header with Safe Status Bar Offset */}
       <View style={styles.header}>
         <View>
           <Text style={styles.appTitle}>TapCash</Text>
@@ -200,7 +201,7 @@ export default function App() {
           onPress={() => setIsOfflineMode(!isOfflineMode)}
         >
           <Text style={styles.networkBadgeText}>
-            {isOfflineMode ? '🔴 Offline Mode' : '🟢 Online Mode'}
+            {isOfflineMode ? '🔴 Offline' : '🟢 Online'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -564,15 +565,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 8 : 0,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingTop: Platform.OS === 'ios' ? 10 : 8,
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: Colors.surfaceBorder,
+    backgroundColor: Colors.background,
   },
   appTitle: {
     fontSize: 22,
@@ -603,7 +607,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 100,
+    paddingBottom: 110,
   },
   balanceCard: {
     backgroundColor: Colors.surface,
