@@ -26,14 +26,6 @@
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE"
       ]
-    },
-    "plugins": [
-      [
-        "expo-secure-store",
-        {
-          "faceIDPermission": "Allow $(PRODUCT_NAME) to access Face ID for secure transactions."
-        }
-      ]
-    ]
+    }
   }
 }
