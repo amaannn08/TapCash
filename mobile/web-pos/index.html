@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TapCash Merchant POS Terminal (Laptop Emulator)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .nfc-ring { animation: pulse-ring 2s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-white min-h-screen font-sans flex flex-col items-center justify-center p-4">
+
+  <div class="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-6 shadow-2xl">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-zinc-800 pb-4 mb-6">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-xl">⚡</div>
+        <div>
+          <h1 class="font-extrabold text-lg tracking-tight">TapCash POS Terminal</h1>
+          <p class="text-xs text-zinc-400">Merchant: Metro Coffee Roasters</p>
+        </div>
+      </div>
+      <span class="px-2.5 py-1 text-xs rounded-full bg-emerald-950 text-emerald-400 font-semibold border border-emerald-800">
+        🟢 POS Active
+      </span>
+    </div>
+
+    <!-- Screen 1: Keypad / Amount Input -->
+    <div id="screen-input" class="space-y-6">
+      <div class="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-center">
+        <p class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Charge Amount</p>
+        <div class="text-4xl font-black text-white flex items-center justify-center">
+          <span class="text-emerald-500 mr-1">₹</span>
+          <span id="display-amount">150</span>
+        </div>
+      </div>
+
+      <!-- Quick Preset Amounts -->
+      <div class="grid grid-cols-4 gap-2">
+        <button onclick="setAmount(50)" class="bg-zinc-800 hover:bg-zinc-700 py-2.5 rounded-xl font-bold text-sm">₹50</button>
+        <button onclick="setAmount(150)" class="bg-zinc-800 hover:bg-zinc-700 py-2.5 rounded-xl font-bold text-sm">₹150</button>
+        <button onclick="setAmount(250)" class="bg-zinc-800 hover:bg-zinc-700 py-2.5 rounded-xl font-bold text-sm">₹250</button>
+        <button onclick="setAmount(500)" class="bg-zinc-800 hover:bg-zinc-700 py-2.5 rounded-xl font-bold text-sm">₹500</button>
+      </div>
+
+      <!-- Start Tap Button -->
+      <button onclick="generateNfcIntent()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold py-4 rounded-2xl text-base transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center space-x-2">
+        <span>📶 Initiate Tap-to-Pay / QR Beam</span>
+      </button>
+    </div>
+
+    <!-- Screen 2: Tap-to-Pay NFC / QR Beam Screen -->
+    <div id="screen-tap" class="hidden space-y-6 text-center">
+      <div class="relative py-4 flex flex-col items-center">
+        <div class="w-48 h-48 bg-white p-3 rounded-2xl shadow-inner flex items-center justify-center mb-4" id="qrcode-container"></div>
+        <p class="text-sm font-bold text-white mb-1">Hold Phone Near Screen to Pay</p>
+        <p class="text-xs text-zinc-400">Total: <span id="tap-amount-display" class="text-emerald-400 font-bold text-base">₹150</span></p>
+        <p class="text-[11px] font-mono text-zinc-500 mt-2 bg-zinc-950 px-3 py-1.5 rounded-lg border border-zinc-800" id="challenge-nonce"></p>
+      </div>
+
+      <!-- Quick Complete Simulator Button -->
+      <div class="border-t border-zinc-800 pt-4 space-y-2">
+        <button onclick="simulatePhoneTap()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl text-sm transition">
+          ⚡ Simulate Immediate Phone Tap (<200ms)
+        </button>
+        <button onclick="resetPOS()" class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold py-2.5 rounded-xl text-xs">
+          Cancel Transaction
+        </button>
+      </div>
+    </div>
+
+    <!-- Screen 3: Payment Success / Cryptographic Voucher Receipt -->
+    <div id="screen-success" class="hidden space-y-4">
+      <div class="bg-emerald-950/40 border border-emerald-800/60 rounded-2xl p-5 text-center">
+        <div class="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-2 text-2xl font-black">✓</div>
+        <h2 class="text-xl font-black text-white">Payment Received!</h2>
+        <p class="text-emerald-400 text-2xl font-black mt-1" id="success-amount">₹150.00</p>
+        <p class="text-xs text-zinc-400 mt-1">Verified with Ed25519 Cryptographic Signature</p>
+      </div>
+
+      <!-- Signed Voucher Details -->
+      <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-left">
+        <p class="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Receipt / Voucher Payload</p>
+        <pre class="text-[10px] font-mono text-zinc-300 overflow-x-auto p-2 bg-zinc-900 rounded" id="voucher-json"></pre>
+      </div>
+
+      <button onclick="resetPOS()" class="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl text-sm transition">
+        New Sale
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let currentAmount = 150;
+    let currentNonce = '';
+    let qrcode = null;
+
+    function setAmount(val) {
+      currentAmount = val;
+      document.getElementById('display-amount').innerText = val;
+    }
+
+    function generateNfcIntent() {
+      currentNonce = 'nonce_' + Math.random().toString(36).substring(2, 12);
+      document.getElementById('screen-input').classList.add('hidden');
+      document.getElementById('screen-tap').classList.remove('hidden');
+      document.getElementById('tap-amount-display').innerText = '₹' + currentAmount;
+      document.getElementById('challenge-nonce').innerText = 'Challenge: ' + currentNonce;
+
+      const payload = JSON.stringify({
+        type: 'TAPCASH_POS_INTENT',
+        merchantId: 'usr_merchant_coffee_99',
+        merchantName: 'Metro Coffee Roasters',
+        amountCents: currentAmount * 100,
+        nonce: currentNonce,
+        timestamp: Date.now()
+      });
+
+      const qrContainer = document.getElementById('qrcode-container');
+      qrContainer.innerHTML = '';
+      qrcode = new QRCode(qrContainer, {
+        text: payload,
+        width: 170,
+        height: 170,
+        colorDark: '#09090b',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+
+    function simulatePhoneTap() {
+      const voucher = {
+        voucher_id: 'vch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        payer_public_key: 'pub_ed25519_client_device_77a9',
+        payee_id: 'usr_merchant_coffee_99',
+        amount_cents: currentAmount * 100,
+        currency: 'INR',
+        sequence_number: Math.floor(Math.random() * 50) + 1,
+        timestamp: Date.now(),
+        nonce: currentNonce,
+        signature: '30450221008f...ed25519_verified_signature'
+      };
+
+      document.getElementById('screen-tap').classList.add('hidden');
+      document.getElementById('screen-success').classList.remove('hidden');
+      document.getElementById('success-amount').innerText = '₹' + currentAmount + '.00';
+      document.getElementById('voucher-json').innerText = JSON.stringify(voucher, null, 2);
+    }
+
+    function resetPOS() {
+      document.getElementById('screen-success').classList.add('hidden');
+      document.getElementById('screen-tap').classList.add('hidden');
+      document.getElementById('screen-input').classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>
