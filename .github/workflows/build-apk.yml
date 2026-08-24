@@ -57,7 +57,9 @@ jobs:
 
       - name: Export & Prebuild Android Project
         working-directory: ./mobile
-        run: npx @expo/cli prebuild --platform android --clean --no-install
+        env:
+          CI: 1
+        run: npx expo prebuild --platform android --clean --no-install
 
       - name: Generate Production Keystore
         working-directory: ./mobile/android/app
